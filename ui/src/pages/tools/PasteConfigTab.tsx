@@ -22,6 +22,7 @@ import {
   type OAuthConnectPhase,
 } from "@/features/connections/ConnectionSetupFlow";
 import { endpointHost } from "@/pages/apps/generic-mcp-connect";
+import { AddConnectionDialog } from "./connection-dialogs";
 import { McpConfigHelpDialog } from "./McpConfigHelpDialog";
 import { ErrorState } from "./shared";
 
@@ -103,6 +104,7 @@ function askFirstLevelsFrom(result: ConnectToolAppResult): string[] {
 export function PasteConfigTab({ companyId }: { companyId: string }) {
   const navigate = useNavigate();
   const [draftText, setDraftText] = useState("");
+  const [addingFromTemplate, setAddingFromTemplate] = useState(false);
   const [preview, setPreview] = useState<McpJsonImportPreview | null>(null);
   const [connectionNames, setConnectionNames] = useState<Record<string, string>>({});
   const [credentialValues, setCredentialValues] = useState<Record<string, string>>({});
@@ -264,8 +266,15 @@ export function PasteConfigTab({ companyId }: { companyId: string }) {
         <Link to="/apps" className="text-primary hover:underline">
           Browse planned app connections
         </Link>{" "}
-        instead.
+        instead. Running a local command from an approved template?{" "}
+        <button type="button" className="text-primary hover:underline" onClick={() => setAddingFromTemplate(true)}>
+          Add it from a template
+        </button>
+        .
       </p>
+      {addingFromTemplate ? (
+        <AddConnectionDialog companyId={companyId} onClose={() => setAddingFromTemplate(false)} />
+      ) : null}
 
       <div className="space-y-2">
         <Textarea
