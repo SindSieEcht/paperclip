@@ -1,4 +1,5 @@
-import { lstat, open } from "node:fs/promises";
+import { open, realpath } from "node:fs/promises";
+import path from "node:path";
 import { openRunnerApiWorkspaceFile } from "./native-runtime/runner-api-files.js";
 
 const MAX_CREDENTIAL_BYTES = 64 * 1024;
@@ -6,9 +7,11 @@ const MAX_CREDENTIAL_BYTES = 64 * 1024;
 /** Bounded descriptor read; never follows symlinks or reopens a checked path. */
 export async function readLocalAiCredentialFile(filename: string): Promise<string> {
   const windows = process.platform === "win32";
-  // ponytail: local-only. Windows has no confined open or POSIX owner/mode, so
-  // this rejects links by lstat (check-then-open race) and relies on profile ACLs.
-  if (windows && !(await lstat(filename)).isFile()) throw new Error("Invalid credential file");
+  // ponytail: local-only. Windows has no confined open or POSIX owner/mode, so this
+  // rejects any link in the path by realpath (check-then-open race) and relies on profile ACLs.
+  if (windows && (await realpath(filename)).toLowerCase() !== path.resolve(filename).toLowerCase()) {
+    throw new Error("Invalid credential file");
+  }
   const file = windows ? await open(filename, "r") : await openRunnerApiWorkspaceFile(filename);
   try {
     const stat = await file.stat();
