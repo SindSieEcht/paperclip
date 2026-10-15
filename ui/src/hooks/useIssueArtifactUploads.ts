@@ -1,3 +1,4 @@
+import { createUuid } from "@/lib/uuid";
 import { useCallback, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Issue, IssueAttachment, IssueDocument } from "@paperclipai/shared";
@@ -52,7 +53,7 @@ export function useIssueArtifactUploads(issue: Pick<Issue, "id" | "companyId">) 
     });
   }, [client, issue.companyId, issue.id]);
 
-  const upload = useCallback((picked: File[]) => enqueue(picked.map(file => ({ id: crypto.randomUUID(), file }))), [enqueue]);
+  const upload = useCallback((picked: File[]) => enqueue(picked.map(file => ({ id: createUuid(), file }))), [enqueue]);
   const retry = useCallback((id: string) => {
     const file = files.current.get(id);
     if (file) enqueue([{ id, file }]);
