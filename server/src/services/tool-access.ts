@@ -20,6 +20,7 @@ import { BROWSER_USE_TOOLS } from "@paperclipai/shared";
 import { browserUseClient, isBrowserUseConnection } from "./browser-use-client.js";
 import { browserUseService } from "./browser-use.js";
 import { COGNEE_STDIO_TEMPLATE, cogneeCloudUrl } from "./cognee-connection.js";
+import { loadInstanceStdioTemplates } from "./instance-stdio-templates.js";
 import { isMemoryConnectorId, isRemoteMcpConnectorMethod, connectionPurposeTransportSchema } from "@paperclipai/shared";
 import { instanceSettingsService } from "./instance-settings.js";
 import { githubBotRequest } from "./chat-github-client.js";
@@ -950,6 +951,18 @@ const APPROVED_STDIO_TEMPLATES: Record<
     ],
   },
 };
+
+for (const [templateId, template] of Object.entries(loadInstanceStdioTemplates())) {
+  APPROVED_STDIO_TEMPLATES[templateId] = {
+    name: template.name,
+    command: template.command,
+    args: template.args,
+    envKeys: template.envKeys,
+    tools: template.tools
+      .map((tool) => normalizeToolDescriptor(tool))
+      .filter((tool): tool is McpToolDescriptor => Boolean(tool)),
+  };
+}
 
 const GOOGLE_SHEETS_GALLERY_KEY = "google-sheets";
 const GOOGLE_SHEETS_TEMPLATE_ID = "paperclip.google-sheets";

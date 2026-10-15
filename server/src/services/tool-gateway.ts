@@ -7,6 +7,7 @@ import { boundedMcpToolName } from "./mcp-tool-names.js";
 import { browserUseService } from "./browser-use.js";
 import { isBrowserUseConnection } from "./browser-use-client.js";
 import { COGNEE_STDIO_TEMPLATE, cogneeCloudUrl, callCogneeCloud } from "./cognee-connection.js";
+import { loadInstanceStdioTemplates } from "./instance-stdio-templates.js";
 import { HttpError } from "../errors.js";
 import { claimSlackRateLimitRetry } from "./connectors/slack-retry.js";
 import { resolveSlackTaskAuthority } from "./connectors/slack-authority.js";
@@ -464,6 +465,7 @@ type LocalStdioRuntimeTemplate = {
   command: string | null;
   args: string[];
   envKeys: string[];
+  env?: Record<string, string>;
 };
 
 const BUILTIN_LOCAL_STDIO_RUNTIME_TEMPLATES: Record<
@@ -491,6 +493,10 @@ const BUILTIN_LOCAL_STDIO_RUNTIME_TEMPLATES: Record<
     envKeys: [],
   },
 };
+
+for (const [templateId, { command, args, envKeys, env }] of Object.entries(loadInstanceStdioTemplates())) {
+  BUILTIN_LOCAL_STDIO_RUNTIME_TEMPLATES[templateId] = { command, args, envKeys, env };
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -5034,6 +5040,7 @@ export function createToolGatewayService(
         env[key] = value;
       }
     }
+    Object.assign(env, template.env);
     for (const key of template.envKeys) {
       const grantRef = grant.credentialSecretRefs.find(
         (ref) => ref.configPath === `env.${key}`,
