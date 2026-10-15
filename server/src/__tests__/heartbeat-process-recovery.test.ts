@@ -8315,7 +8315,7 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
     await heartbeat.cancelRun(runId, "Cancelled before issue reassignment", {
       errorCode: "issue_reassigned", resultJson: { reassignmentStopConfirmed: true },
     });
-    await db.update(issues).set({ assigneeAgentId: newAgentId }).where(eq(issues.id, issueId));
+    await db.update(issues).set({ assigneeAgentId: newAgentId, status: "in_review", executionRunId: null, checkoutRunId: null }).where(eq(issues.id, issueId));
     // An older wake from a third agent is parked behind the same execution.
     const mentionedAgentId = randomUUID();
     await db.insert(agents).values({ id: mentionedAgentId, companyId, name: "Mentioned", role: "engineer",
@@ -8345,6 +8345,38 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
     const [wake] = await parked();
     expect(wake).toMatchObject({ status: expect.not.stringMatching(/^deferred_issue_execution$/), runId: expect.any(String) });
     expect((await heartbeat.getRun(wake!.runId!))).toMatchObject({ agentId: newAgentId,
+      contextSnapshot: expect.objectContaining({ issueId, wakeCommentIds: [handoff!.id] }) });
+  });
+
+  it("sweeps a handoff wake parked after the old owner's cleanup already ran", async () => {
+    const { companyId, agentId, issueId, runId } = await seedRunFixture({
+      runtimeMode: "legacy", adapterType: "claude_local", agentStatus: "idle", runStatus: "cancelled",
+    });
+    mockAdapterExecute.mockImplementation(async () => ({ exitCode: 0, summary: "Reviewed", provider: "test", model: "test-model" }));
+    const newAgentId = randomUUID();
+    await db.insert(agents).values({ id: newAgentId, companyId, name: "Reviewer", role: "engineer",
+      status: "idle", adapterType: "claude_local", adapterConfig: {}, runtimeConfig: {}, permissions: {} });
+    await db.update(heartbeatRuns).set({ errorCode: "issue_reassigned", finishedAt: new Date(), resultJson: {
+      reassignmentStopConfirmed: true, executionCancellation: { state: "acknowledged" }, conversationContinuation: "continue_conversation_v1",
+    } }).where(eq(heartbeatRuns.id, runId));
+    await db.update(issues).set({ assigneeAgentId: newAgentId, status: "in_review", executionRunId: null, checkoutRunId: null })
+      .where(eq(issues.id, issueId));
+    const [handoff] = await db.insert(issueComments).values({
+      companyId, issueId, authorAgentId: agentId, createdByRunId: runId, body: "Over to you",
+    }).returning();
+    const [wake] = await db.insert(agentWakeupRequests).values({
+      companyId, agentId: newAgentId, source: "assignment", reason: "issue_assigned", status: "deferred_issue_execution",
+      requestedByActorType: "agent", requestedByActorId: agentId,
+      payload: { issueId, commentId: handoff!.id, mutation: "update",
+        _paperclipWakeContext: { issueId, wakeReason: "issue_assigned", wakeCommentIds: [handoff!.id] } },
+    }).returning();
+
+    const heartbeat = heartbeatService(db);
+    await heartbeat.resumeQueuedRuns();
+    await heartbeat.drainActiveRunExecutions();
+    const [updated] = await db.select().from(agentWakeupRequests).where(eq(agentWakeupRequests.id, wake!.id));
+    expect(updated!.runId).toBeTruthy();
+    expect(await heartbeat.getRun(updated!.runId!)).toMatchObject({ agentId: newAgentId,
       contextSnapshot: expect.objectContaining({ issueId, wakeCommentIds: [handoff!.id] }) });
   });
 

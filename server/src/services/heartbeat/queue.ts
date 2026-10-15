@@ -1790,10 +1790,12 @@ export function createHeartbeatQueue(db: Db, dependencies: HeartbeatQueueDepende
     for (const { wake } of strandedQueues) {
       if (!queuedCommentIdsFromWakePayload(wake.payload).length &&
           !await readQueuedInteractionResponse(db, wake.companyId, String(wake.payload?.issueId), wake.payload)) continue;
+      // A new assignee has no run yet; its handoff wake waits on the old owner's
+      // run, whose cleanup can miss a wake committed just after it.
       const [latest] = await db.select().from(heartbeatRuns).where(and(
-        eq(heartbeatRuns.companyId, wake.companyId), eq(heartbeatRuns.agentId, wake.agentId),
+        eq(heartbeatRuns.companyId, wake.companyId),
         sql`${heartbeatRuns.contextSnapshot}->>'issueId' = ${String(wake.payload?.issueId)}`,
-      )).orderBy(desc(heartbeatRuns.createdAt), desc(heartbeatRuns.id)).limit(1);
+      )).orderBy(desc(sql`${heartbeatRuns.agentId} = ${wake.agentId}`), desc(heartbeatRuns.createdAt), desc(heartbeatRuns.id)).limit(1);
       await db.update(agentWakeupRequests).set({ updatedAt: new Date() }).where(and(
         eq(agentWakeupRequests.id, wake.id), eq(agentWakeupRequests.status, "deferred_issue_execution"),
       ));
