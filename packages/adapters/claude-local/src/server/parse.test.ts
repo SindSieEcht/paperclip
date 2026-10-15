@@ -103,6 +103,23 @@ describe("detectClaudeLoginRequired", () => {
     ).toBe(false);
   });
 
+  it("does not classify a success whose tool result or answer says unauthorized", () => {
+    // Real false positive: the agent read the Paperclip skill doc, which says the
+    // server "rejects unknown or unauthorized recipients".
+    const parsed = { is_error: false, subtype: "success", result: "Done; the unauthorized call is fixed." };
+    const stdout = [
+      '{"type":"user","message":{"content":[{"type":"tool_result","content":"The server rejects unknown or unauthorized recipients."}]}}',
+      '{"type":"assistant","message":{"content":[{"type":"text","text":"Not logged in is handled by the gate."}]}}',
+    ].join("\n");
+    expect(detectClaudeLoginRequired({ parsed, stdout, stderr: "" }).requiresLogin).toBe(false);
+  });
+
+  it("still classifies the CLI's own not-logged-in event as login required", () => {
+    const stdout =
+      '{"type":"assistant","message":{"content":[{"type":"text","text":"Not logged in · Please run /login"}]},"error":"authentication_failed"}';
+    expect(detectClaudeLoginRequired({ parsed: null, stdout, stderr: "" }).requiresLogin).toBe(true);
+  });
+
   it("does not classify a success whose result text repeats a token phrase", () => {
     // The model's own answer repeats a token phrase, so the phrase lands in the
     // parsed result. The run is a success, so the failure gate keeps it healthy.

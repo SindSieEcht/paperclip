@@ -239,6 +239,16 @@ function claudeResultIndicatesAuthFailure(parsed: Record<string, unknown>): bool
   return extractClaudeErrorMessages(parsed).length > 0;
 }
 
+// A stream-json user event (tool result) or assistant event without the CLI's
+// own `error` field carries untrusted prose, not a CLI login prompt.
+function isClaudeModelOrToolEventLine(line: string): boolean {
+  if (!line.startsWith("{")) return false;
+  const event = parseJson(line);
+  if (!event) return false;
+  const type = asString(event.type, "");
+  return type === "user" || (type === "assistant" && !asString(event.error, "").trim());
+}
+
 export function detectClaudeLoginRequired(input: {
   parsed: Record<string, unknown> | null;
   stdout: string;
@@ -247,22 +257,27 @@ export function detectClaudeLoginRequired(input: {
   const parsed = input.parsed ?? null;
   const resultText = asString(parsed?.result, "").trim();
 
-  // The legacy login-prompt markers keep their broad scope. They match against
-  // every output line, which includes the parsed result, the parsed errors, and
-  // the raw stdout and stderr.
-  const promptLines = [resultText, ...extractClaudeErrorMessages(parsed ?? {}), input.stdout, input.stderr]
+  // The legacy login-prompt markers match the parsed errors, the raw stderr, and
+  // the raw stdout minus model prose and tool results: an agent that reads a doc
+  // saying "unauthorized" must not flip a healthy run to login required.
+  const failedResult = parsed !== null && claudeResultIndicatesAuthFailure(parsed);
+  const promptLines = [
+    failedResult || parsed === null ? resultText : "",
+    ...extractClaudeErrorMessages(parsed ?? {}),
+    input.stdout,
+    input.stderr,
+  ]
     .join("\n")
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter(Boolean);
+    .filter((line) => line && !isClaudeModelOrToolEventLine(line));
   const loginPrompt = promptLines.some((line) => CLAUDE_LOGIN_PROMPT_RE.test(line));
 
   // The token-failure markers match only against the parsed terminal fields of
   // a failed run. The raw stdout is untrusted, so a model that prints a token
   // phrase, or a successful run that repeats one, does not flip the classifier.
   const tokenFailure =
-    parsed !== null &&
-    claudeResultIndicatesAuthFailure(parsed) &&
+    failedResult &&
     CLAUDE_AUTH_TOKEN_FAILURE_RE.test(collectClaudeTerminalText(parsed));
 
   return {
