@@ -46,12 +46,25 @@ _, status = os.waitpid(pid, 0)
 sys.exit(os.waitstatus_to_exitcode(status))
 `;
 
+/**
+ * ConPTY starts each row with a cursor jump instead of a newline, and opens an
+ * OSC 8 hyperlink before jumping to the link's row. The line-based setup-token
+ * parser needs both back on their own lines.
+ * ponytail: assumes an escape sequence never splits across chunks; buffer if a capture shows it does.
+ */
+export function normalizeConptyOutput(chunk: string): string {
+  return chunk
+    .replace(/\x1b\[\d+;\d+H/g, "\r\n")
+    .replace(/\x1b\]8;[^;\x1b\x07]*;(?=[^\x1b\x07])/g, "\r\n$&");
+}
+
 /** Run the same browser-code login used by sandbox connections on the local host. */
 export function startLocalBrowserLogin(provider: "anthropic" | "openai", home: string): LocalBrowserLoginState {
   const controller = new AbortController();
   const state: LocalBrowserLoginState = { abort: () => controller.abort() };
   const args = provider === "anthropic" ? ["setup-token"] : ["login", "--device-auth"];
   let child: ChildProcessWithoutNullStreams | null = null;
+  let terminal: import("@lydell/node-pty").IPty | null = null;
   const driver = {
     async start(_command: string, onData: (chunk: string) => void): Promise<{ exitCode: number | null }> {
       let executable = "claude";
@@ -80,6 +93,27 @@ export function startLocalBrowserLogin(provider: "anthropic" | "openai", home: s
         CODEX_HOME: provider === "openai" ? home : process.env.CODEX_HOME,
         BROWSER: "true",
       };
+      if (process.platform === "win32") {
+        // Python's pty module needs termios, which Windows lacks; use ConPTY instead.
+        let spawnTerminal: typeof import("@lydell/node-pty").spawn;
+        let file: string;
+        try {
+          spawnTerminal = (await import("@lydell/node-pty")).spawn;
+          file = path.isAbsolute(executable)
+            ? executable
+            : path.resolve(home, await resolveCommandForLogs(executable, home, env));
+        } catch {
+          state.error = "Browser sign-in could not start the provider CLI in a terminal. Make sure it is installed and on Paperclip's PATH, then start sign-in again.";
+          throw new Error("Browser login terminal unavailable");
+        }
+        // npm installs CLIs as .cmd shims, which ConPTY cannot launch directly.
+        const shim = /\.(cmd|bat)$/i.test(file);
+        // Wide columns keep the authorization URL on one line for the prompt parser.
+        terminal = spawnTerminal(shim ? (process.env.COMSPEC ?? "cmd.exe") : file, shim ? ["/d", "/s", "/c", file, ...args] : args,
+          { cols: 1000, rows: 40, cwd: home, env });
+        terminal.onData((chunk) => onData(normalizeConptyOutput(chunk)));
+        return new Promise((resolve) => terminal!.onExit(({ exitCode }) => resolve({ exitCode })));
+      }
       return new Promise((resolve, reject) => {
         child = spawn("python3", ["-u", "-c", PYTHON_PTY_BRIDGE, executable, ...args], { env, stdio: ["pipe", "pipe", "pipe"] });
         child.stdout.on("data", (bytes: Buffer) => onData(bytes.toString("utf8")));
@@ -92,9 +126,9 @@ export function startLocalBrowserLogin(provider: "anthropic" | "openai", home: s
         child.once("close", (exitCode) => resolve({ exitCode }));
       });
     },
-    write(input: string) { child?.stdin.write(input); },
-    stop() { child?.kill("SIGTERM"); },
-    async dispose() { child?.kill("SIGTERM"); },
+    write(input: string) { if (terminal) terminal.write(input); else child?.stdin.write(input); },
+    stop() { terminal?.kill(); child?.kill("SIGTERM"); },
+    async dispose() { terminal?.kill(); child?.kill("SIGTERM"); },
     async readFile(file: string) { const { readLocalAiCredentialFile } = await import("./local-ai-credential-file.js"); return Buffer.from(await readLocalAiCredentialFile(file)); },
   };
   if (provider === "anthropic") {
