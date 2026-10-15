@@ -296,6 +296,7 @@ import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import {
   and,
+  desc,
   eq,
   exists,
   inArray,
@@ -3871,6 +3872,17 @@ export function heartbeatService(
             resultJson: sql`coalesce(${heartbeatRuns.resultJson}, '{}'::jsonb) ||
               ${JSON.stringify({ startupPreparationSettledAt: new Date().toISOString() })}::jsonb`,
           }).where(and(eq(heartbeatRuns.id, run.id), eq(heartbeatRuns.status, "cancelled")));
+        }
+        if (latestRun?.status === "cancelled" && latestRun.runtimeMode === "legacy" && !legacyAdapterEntered &&
+            !nativeDispatchStarted && !nativeOwnershipHeld) {
+          // Stopped during startup: this settled executor never entered the
+          // adapter, so no provider process exists to wait for.
+          await db.update(heartbeatRuns).set({
+            resultJson: sql`coalesce(${heartbeatRuns.resultJson}, '{}'::jsonb) ||
+              ${JSON.stringify({ executionRecovery: { kind: "bootstrap", providerWorkStarted: false } })}::jsonb`,
+          }).where(and(eq(heartbeatRuns.id, run.id), eq(heartbeatRuns.status, "cancelled"),
+            isNull(heartbeatRuns.processPid), isNull(heartbeatRuns.processGroupId),
+            sql`${heartbeatRuns.resultJson}->'executionRecovery' is null`));
         }
         await db.update(heartbeatRuns).set({
           executionStage: sql`case when ${heartbeatRuns.status} = 'cancelled' then 'settled' else ${heartbeatRuns.executionStage} end`,

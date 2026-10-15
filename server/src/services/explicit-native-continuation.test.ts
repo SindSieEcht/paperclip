@@ -1215,6 +1215,29 @@ const support = await getEmbeddedPostgresTestSupport();
     expect(source.resultJson).toBeNull();
   });
 
+  it.each([true, false])("admits a user turn after a legacy run stopped before the adapter started (receipt: %s)", async receipt => {
+    const f = await seed();
+    await db.update(agents).set({ adapterType: "claude_local" }).where(eq(agents.id, f.agentId));
+    await db.update(heartbeatRuns).set({ runtimeMode: "legacy", status: "cancelled", processPid: null,
+      errorCode: "operator_interrupted", startedAt: new Date("2026-09-11T09:59:00Z"),
+      resultJson: { cancellation: { expected: true, source: "queued_message" },
+        ...(receipt ? { executionRecovery: { kind: "bootstrap", providerWorkStarted: false } } : {}) },
+    }).where(eq(heartbeatRuns.id, f.sourceRunId));
+    await db.delete(nativeRunFinalizations).where(eq(nativeRunFinalizations.runId, f.sourceRunId));
+    await db.update(issueRecoveryActions).set({ cause: "legacy_execution_requires_reconciliation" })
+      .where(eq(issueRecoveryActions.sourceIssueId, f.issueId));
+    const blocked = vi.fn();
+    const result = await db.transaction(tx => admitExplicitNativeContinuation({ ...f, onBlocked: blocked,
+      db: tx as unknown as typeof db }));
+    if (receipt) {
+      expect(result).toMatchObject({ previousRunId: f.sourceRunId });
+      expect(await getExecutionBlocker(db, f.companyId, f.issueId)).toBeNull();
+    } else {
+      expect(result).toBeNull();
+      expect(blocked).toHaveBeenCalledWith("process_identity_missing", expect.any(String));
+    }
+  });
+
   it.each(["claim", "invocation"])("does not convert a known process run after switching the agent to Claude: %s", async evidence => {
     const f = await seed();
     await db.update(agents).set({ adapterType: "claude_local" }).where(eq(agents.id, f.agentId));
