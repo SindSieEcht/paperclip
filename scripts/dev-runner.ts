@@ -656,7 +656,8 @@ async function markChildAsCurrent() {
   dirtyPaths = new Set();
   lastChangedAt = null;
   lastRestartAt = new Date().toISOString();
-  await refreshPendingMigrations();
+  // No migration refresh here: every caller just ran preflight, and a second
+  // migration-status would race the child server for the embedded Postgres.
   await updateDevServiceRecord();
 }
 
