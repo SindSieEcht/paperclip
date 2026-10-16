@@ -404,6 +404,69 @@ function ReconnectForm({
   );
 }
 
+// Mirrors the gateway's MAX_CONNECTION_TOOL_TIMEOUT_MS (15 minutes).
+const MAX_TOOL_TIMEOUT_SECONDS = 900;
+
+function withToolTimeout(config: Record<string, unknown> | undefined, ms: number | null) {
+  const { toolTimeoutMs: _previous, ...rest } = config ?? {};
+  return ms === null ? rest : { ...rest, toolTimeoutMs: ms };
+}
+
+/** Only plain MCP connections run tools through the gateway timeout an operator can raise. */
+export function toolTimeoutEditable(connection: ToolConnection): boolean {
+  return connection.connectionPurpose !== "ai" &&
+    (connection.transport === "mcp_remote" || connection.transport === "local_stdio");
+}
+
+/** Lets slow tools (e.g. editor test runs) outlast the gateway's 10-second default. */
+export function ToolTimeoutSettings({ connection, onSaved }: { connection: ToolConnection; onSaved: () => void }) {
+  const { pushToast } = useToast();
+  const savedMs = connection.config?.toolTimeoutMs;
+  const [seconds, setSeconds] = useState(typeof savedMs === "number" ? String(savedMs / 1000) : "");
+  const parsed = seconds.trim() === "" ? null : Number(seconds);
+  const valid = parsed === null || (Number.isInteger(parsed) && parsed >= 1 && parsed <= MAX_TOOL_TIMEOUT_SECONDS);
+  const save = useMutation({
+    mutationFn: () => {
+      const ms = parsed === null ? null : parsed * 1000;
+      return toolsApi.updateConnection(connection.id, {
+        config: withToolTimeout(connection.config, ms),
+        transportConfig: withToolTimeout(connection.transportConfig, ms),
+      });
+    },
+    onSuccess: () => {
+      pushToast({ title: "Tool timeout saved", tone: "success" });
+      onSaved();
+    },
+    onError: (err) =>
+      pushToast({ title: "Could not save tool timeout", body: err instanceof Error ? err.message : String(err), tone: "error" }),
+  });
+  return (
+    <section className="space-y-2">
+      <h2 className="text-sm font-medium text-foreground">Tool timeout</h2>
+      <p className="text-xs text-muted-foreground">
+        How long one tool call may run before Paperclip stops it. Raise it for slow tools such as editor test runs.
+      </p>
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <Input
+          type="number"
+          min={1}
+          max={MAX_TOOL_TIMEOUT_SECONDS}
+          inputMode="numeric"
+          aria-label="Tool timeout in seconds"
+          placeholder="10"
+          value={seconds}
+          onChange={(event) => setSeconds(event.target.value)}
+          className="h-8 w-24"
+        />
+        <span className="text-muted-foreground">seconds (blank = default, max {MAX_TOOL_TIMEOUT_SECONDS})</span>
+        <Button size="sm" variant="outline" disabled={!valid || save.isPending} onClick={() => save.mutate()}>
+          {save.isPending ? "Saving…" : "Save"}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
 function TechnicalDetails({ connection }: { connection: ToolConnection }) {
   const [open, setOpen] = useState(false);
   return (

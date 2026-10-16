@@ -771,6 +771,16 @@ function timeoutMs(value: number | undefined, tool?: ToolGatewayDescriptor) {
   );
 }
 
+// Matches the ACP Claude MCP_TOOL_TIMEOUT so the agent never gives up first.
+export const MAX_CONNECTION_TOOL_TIMEOUT_MS = 15 * 60 * 1000;
+
+/** Operator-set minimum timeout for slow tools on one connection, such as editor test runs. */
+export function connectionToolTimeoutMs(config: unknown): number | null {
+  const value = asRecord(config)?.toolTimeoutMs;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 1) return null;
+  return Math.min(MAX_CONNECTION_TOOL_TIMEOUT_MS, Math.floor(value));
+}
+
 function sessionTtlMs(value: number | undefined) {
   if (!Number.isFinite(value)) return DEFAULT_SESSION_TTL_MS;
   return Math.max(
@@ -5996,6 +6006,8 @@ export function createToolGatewayService(
     assertGmailArchiveToolArgumentsSupported(connection, entry.toolName, parameters);
     if (useDefaultTimeout && isRailwayConnection(connection) && entry.toolName === `${RAILWAY_TOOL_PREFIX}run-command`) {
       ms = railwayCommandBudgetMs(parameters);
+    } else {
+      ms = Math.max(ms, connectionToolTimeoutMs(connection.config) ?? 0);
     }
     const grant = await resolveConnectionGrant(session, connection);
     if (isDaytonaConnection(connection)) {
@@ -6463,7 +6475,8 @@ export function createToolGatewayService(
       grant,
     );
     const invoke = () => callLocalStdioMcp({ connection, entry, template, env, parameters,
-      timeoutMs: useProviderDefaultTimeout && template.templateId === "paperclip.cognee-cloud" ? 60_000 : ms });
+      timeoutMs: useProviderDefaultTimeout && template.templateId === "paperclip.cognee-cloud" ? 60_000
+        : Math.max(ms, connectionToolTimeoutMs(connection.config) ?? 0) });
     // Cognee is a bundled HTTP client. Provider failures are tool failures, not
     // crashed local processes, and must never consume slots or restart budgets.
     const result = template.templateId === "paperclip.cognee-cloud"

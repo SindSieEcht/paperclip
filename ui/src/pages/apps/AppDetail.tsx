@@ -65,6 +65,8 @@ import { ReviewPanel } from "./app-detail/ReviewPanel";
 import {
   ReconnectCard,
   DangerZone,
+  ToolTimeoutSettings,
+  toolTimeoutEditable,
   connectionAddress,
   connectionTransportLabel,
 } from "./app-detail/AdvancedPanel";
@@ -648,6 +650,13 @@ function StandardAppDetail({ renderActions, renderAgentSettings, renderConnectio
               {renderConnectionSettings?.(connection)}
               {connection.config?.sourceTemplateKey === "browser-use-cloud" && <BrowserUseSettingsPanel connection={connection} grants={grantsQuery.data} />}
               {connection.config?.sourceTemplateKey === "railway" && <RailwayAccessPanel connection={connection} grants={grantsQuery.data} />}
+              {grantsQuery.data?.capabilities.canConfigure === true && toolTimeoutEditable(connection) && (
+                <ToolTimeoutSettings
+                  key={connection.id}
+                  connection={connection}
+                  onSaved={() => queryClient.invalidateQueries({ queryKey: queryKeys.tools.connection(connectionId) })}
+                />
+              )}
               {connection.config?.provider === "agentmail" && <EmailConnectionInboxes companyId={connection.companyId} connectionId={connection.id} canConfigure={grantsQuery.data?.capabilities?.canConfigure ?? false} />}
               {connection.config?.provider === "agentmail" ? <EmailConnectionAccess companyId={connection.companyId} connectionId={connection.id} agents={agents} /> : <>
               <IdentitiesSection
