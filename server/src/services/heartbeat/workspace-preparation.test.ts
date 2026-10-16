@@ -355,6 +355,16 @@ describe.skipIf(!support.supported)("heartbeat workspace preparation boundary", 
     expect(acquire).not.toHaveBeenCalled();
   });
 
+  it("names the restricted shared source when repository admission is denied", async () => {
+    const { input, issue } = await fixture();
+    vi.spyOn(input.services.executionWorkspacesSvc, "prepareTaskRepositoriesForAdmission")
+      .mockRejectedValue(Object.assign(new Error("Task workspace access is no longer available"), { status: 403 }));
+    await expect(prepareHeartbeatWorkspace(db, input)).rejects.toMatchObject({
+      name: "ConfigurationIncompleteFailure",
+      resultJson: { configurationIncomplete: { reason: "workspace_source_restricted", issueId: issue.id } },
+    });
+  });
+
   it("rechecks physical root access after configured clone and before publication", async () => {
     const { input, source, issue } = await fixture();
     await db.insert(projectWorkspaces).values({ companyId: issue.companyId, projectId: issue.projectId!,
